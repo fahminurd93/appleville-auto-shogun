@@ -20,7 +20,7 @@ export default {
   maxAutoBuyPlots: 3,    // batas beli plot per cycle
 
   // === Minimal balance (RESERVE) ===
-  minCoinsReserve: 2000, // sisakan minimal coins segini
+  minCoinsReserve: 1000, // sisakan minimal coins segini
   minApReserve: 50,      // sisakan minimal AP segini
 
   // Tampilkan info reserve di baris balance?
