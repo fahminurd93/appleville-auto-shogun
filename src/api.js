@@ -52,10 +52,20 @@ function unwrapMutation(resp) {
 }
 
 /* ========= SIGNER (untuk POST) =========
-   Mengikuti pola non-prestige: x-meta-hash = HMAC(signature) per payload,
-   x-client-time = timestamp, x-trace-id = nonce.
+   Mengikuti bundel web app:
+   - Header signature: x-xas3d
+   - Header time     : x-mhab  (timestamp ms)
+   - Header nonce    : x-2sa3  (random hex 16B)
+   Signature = HMAC-SHA256(secret, `${ts}.${nonce}.${JSON.stringify(payload)}`)
 */
-const SECRET = 'aspih0f7303f0248gh204429g24d9jah9dsg97h9!eda';
+const HEADERS = {
+  SIG:   'x-xas3d',
+  TIME:  'x-mhab',
+  NONCE: 'x-2sa3',
+};
+// Secret hasil de-obfuscation dari bundle frontend
+const SECRET = '333ed@#@!@#Ffdf#@!33ed@#@!@#Ffdf#@!';
+
 function signPayload(inputJson) {
   const timestamp = Date.now();
   const nonce = crypto.randomBytes(16).toString('hex');
@@ -99,9 +109,9 @@ async function trpcPost(cookie, path, inputObj) {
       'user-agent': 'Mozilla/5.0',
       'trpc-accept': 'application/json',
       'x-trpc-source': 'nextjs-react',
-      'x-meta-hash': sig.signature,
-      'x-client-time': String(sig.timestamp),
-      'x-trace-id': sig.nonce
+      [HEADERS.SIG]:  sig.signature,
+      [HEADERS.TIME]: String(sig.timestamp),
+      [HEADERS.NONCE]: sig.nonce
     },
     body: JSON.stringify(inputObj)
   });
