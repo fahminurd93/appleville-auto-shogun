@@ -6,6 +6,24 @@
 import cfg from './config.js';
 import crypto from 'node:crypto';
 
+// Signing headers (compat dengan API asli)
+const HEADERS = {
+  SIG:   'x-xas3d',
+  TIME:  'x-mhab',
+  NONCE: 'x-2sa3',
+};
+// Secret dari bundel frontend (de-obfuscated)
+const SECRET = '333ed@#@!@#Ffdf#@!@#Ffdf#@!';
+
+function signPayload(inputJson) {
+  const timestamp = Date.now();
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const payload = JSON.stringify(inputJson ?? {});
+  const msg = `${timestamp}.${nonce}.${payload}`;
+  const signature = crypto.createHmac('sha256', SECRET).update(msg, 'utf8').digest('hex');
+  return { signature, timestamp, nonce };
+}
+
 // === util kecil (copy gaya api.js) ===
 const baseUrl = String(cfg.baseUrl || 'https://app.appleville.xyz/api/trpc').replace(/\/+$/, '');
 const JSONL = 'application/jsonl';
@@ -33,9 +51,16 @@ function parseJsonl(text='') {
 function trpcPath(p){ return `${baseUrl}/${encodeURIComponent(p)}?batch=1`; }
 
 async function trpcPost(path, payload, rawCookie) {
+  // Sign the payload similarly to src/api.js
+  const { signature, timestamp, nonce } = signPayload(payload ?? {});
   const res = await fetch(trpcPath(path), {
     method: 'POST',
-    headers: buildHeaders(rawCookie),
+    headers: {
+      ...buildHeaders(rawCookie),
+      [HEADERS.SIG]: signature,
+      [HEADERS.TIME]: String(timestamp),
+      [HEADERS.NONCE]: nonce
+    },
     body: JSON.stringify(payload ?? { "0": { "json": null } })
   });
   const text = await res.text();
