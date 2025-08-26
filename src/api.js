@@ -97,8 +97,10 @@ async function trpcGetBatch(cookie, paths) {
 
 async function trpcPost(cookie, path, inputObj) {
   const url = `${BASE}/${path}?batch=1`;
+  // Sign payload
   const sig = signPayload(inputObj?.['0']?.json ?? {});
-  const res = await fetch(url, {
+  // First attempt
+  let res = await fetch(url, {
     method: 'POST',
     headers: {
       'accept': 'application/json',
@@ -115,8 +117,35 @@ async function trpcPost(cookie, path, inputObj) {
     },
     body: JSON.stringify(inputObj)
   });
-  const text = await res.text();
-  const frames = parseJsonLines(text);
+  let text = await res.text();
+  let frames = parseJsonLines(text);
+
+  // Retry once if missing signature headers error is returned by server
+  if (res.status === 400 && text?.toLowerCase?.().includes('missing signature headers')) {
+    try {
+      const sig2 = signPayload(inputObj?.['0']?.json ?? {});
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'content-type': 'application/json',
+          'cookie': cookie,
+          'origin': 'https://app.appleville.xyz',
+          'referer': 'https://app.appleville.xyz/',
+          'user-agent': 'Mozilla/5.0',
+          'trpc-accept': 'application/json',
+          'x-trpc-source': 'nextjs-react',
+          [HEADERS.SIG]:  sig2.signature,
+          [HEADERS.TIME]: String(sig2.timestamp),
+          [HEADERS.NONCE]: sig2.nonce
+        },
+        body: JSON.stringify(inputObj)
+      });
+      text = await res.text();
+      frames = parseJsonLines(text);
+    } catch { /* ignore retry fail */ }
+  }
+
   return { ok: !!frames, status: res.status, frames, raw: text };
 }
 
