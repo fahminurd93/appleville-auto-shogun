@@ -11,6 +11,9 @@ import { fmtSec } from './utils/time.js';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const now = () => Date.now();
 
+// ==== MIN AP RESERVE KHUSUS BOOSTER ====
+const BOOSTER_AP_RESERVE = Number(process.env.APV_MIN_AP_RESERVE_BOOST || 120);
+
 /* ========== Helpers slot ========== */
 function getPlots(state){ return Array.isArray(state?.plots) ? state.plots : []; }
 function getPlotsMap(state){ return new Map(getPlots(state).map(p => [p.slotIndex, p])); }
@@ -153,7 +156,7 @@ export async function ensurePlantFlowPush({ seedKey, boosterKey='skip', reserves
   log(`🌱 planted ${plantings.length} slot(s): [${plantings.map(p=>p.slotIndex).join(', ')}]`);
   await sleep(cfg.coolDownMs);
 
-  // BOOSTER (skip jika prestige lock / blacklist)
+  // BOOSTER (skip jika prestige lock / blacklist) + jaga MIN AP khusus booster
   let applied = 0;
   const useBooster = boosterKey && boosterKey !== 'skip';
   if (useBooster) {
@@ -169,33 +172,54 @@ export async function ensurePlantFlowPush({ seedKey, boosterKey='skip', reserves
       } else {
         const needBoost = slotsNeedingBooster(stB.state, targets);
         if (needBoost.length > 0) {
-          const bm = await api.buyModifier(boosterKey, needBoost.length);
-          if (!bm?.ok) {
-            const msg = (typeof bm?.err === 'string' ? bm.err : (bm?.err?.message || 'unknown'));
-            if (/requires level/i.test(msg)) {
-              blockedBoosters.add(boosterKey);
-              log(`ℹ️  booster '${boosterKey}' terkunci prestige — skip (cached)`);
-            } else if (/insufficient|not enough|balance/i.test(msg)) {
-              log('⚠️  skip booster — insufficient balance');
-            } else {
-              log(`⚠️  buy booster failed: ${msg}`);
+          // Protek saldo AP khusus booster: sisakan minimal BOOSTER_AP_RESERVE
+          const boosterMeta = BOOSTERS[boosterKey] || { price:0, currency:'ap' };
+          const unitB  = String(boosterMeta.currency || 'ap').toLowerCase();
+          const priceB = Number(boosterMeta.price || 0);
+          let toBoost = needBoost;
+
+          if (unitB.includes('ap') && priceB > 0) {
+            const balApB = stB.state?.ap ?? stB.state?.apples ?? 0;
+            const maxByReserve = Math.floor(Math.max(0, (balApB - BOOSTER_AP_RESERVE)) / priceB);
+            const allowed = Math.max(0, Math.min(needBoost.length, maxByReserve));
+            if (allowed <= 0) {
+              log(`⚠️  skip booster — jaga min AP ${BOOSTER_AP_RESERVE}`);
+              toBoost = [];
+            } else if (allowed < needBoost.length) {
+              log(`ℹ️  adjust boosters: need=${needBoost.length} → buy=${allowed} (reserve AP ${BOOSTER_AP_RESERVE})`);
+              toBoost = needBoost.slice(0, allowed);
             }
-          } else {
-            await sleep(cfg.coolDownMs);
-            const apps = needBoost.map(slotIndex => ({ slotIndex, modifierKey: boosterKey }));
-            const apR = await api.applyModifier(apps);
-            if (!apR?.ok) {
-              const m = (typeof apR?.err==='string'?apR.err:(apR?.err?.message||'unknown'));
-              if (/requires level/i.test(m)) {
+          }
+
+          if (toBoost.length > 0) {
+            const bm = await api.buyModifier(boosterKey, toBoost.length);
+            if (!bm?.ok) {
+              const msg = (typeof bm?.err === 'string' ? bm.err : (bm?.err?.message || 'unknown'));
+              if (/requires level/i.test(msg)) {
                 blockedBoosters.add(boosterKey);
                 log(`ℹ️  booster '${boosterKey}' terkunci prestige — skip (cached)`);
+              } else if (/insufficient|not enough|balance/i.test(msg)) {
+                log('⚠️  skip booster — insufficient balance');
               } else {
-                log(`⚠️  apply booster failed: ${m}`);
+                log(`⚠️  buy booster failed: ${msg}`);
               }
             } else {
-              applied = apps.length;
-              log(`✨ booster applied to ${applied} slot(s): [${needBoost.join(', ')}]`);
               await sleep(cfg.coolDownMs);
+              const apps = toBoost.map(slotIndex => ({ slotIndex, modifierKey: boosterKey }));
+              const apR = await api.applyModifier(apps);
+              if (!apR?.ok) {
+                const m = (typeof apR?.err==='string'?apR.err:(apR?.err?.message||'unknown'));
+                if (/requires level/i.test(m)) {
+                  blockedBoosters.add(boosterKey);
+                  log(`ℹ️  booster '${boosterKey}' terkunci prestige — skip (cached)`);
+                } else {
+                  log(`⚠️  apply booster failed: ${m}`);
+                }
+              } else {
+                applied = apps.length;
+                log(`✨ booster applied to ${applied} slot(s): [${toBoost.join(', ')}]`);
+                await sleep(cfg.coolDownMs);
+              }
             }
           }
         } else {
